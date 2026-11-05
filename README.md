@@ -80,6 +80,10 @@ progress, and **Reset to Defaults** restores the table above.
 In the campaign, any keyboard layout controls your fighter.
 `Esc` pauses · `F11` toggles fullscreen.
 
+<p align="center">
+  <img src="docs/screenshots/controls.png" width="48%" alt="Controls screen for rebinding keys">
+</p>
+
 ## Power-ups
 
 | Icon | Name | Effect |
