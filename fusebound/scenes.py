@@ -12,7 +12,8 @@ from .ai import Bot
 from .config import (T, GW, GH, HUD, SW, SH, WORLDS, STAGES_PER_WORLD, TOTAL_STAGES,
                      PLAYER_COLORS, PLAYER_NAMES, ITEM_COLORS, ITEM_NAMES, SAVE_DIR, SAVE_FILE,
                      AUTHOR, AUTHOR_GITHUB, AUTHOR_SITE, REPO_URL, VERSION)
-from .controls import KB1, KB2, KB_ALL, KeyController, PadController, MultiController
+from . import controls
+from .controls import KeyController, PadController, MultiController
 from .render import ArenaRenderer
 from .world import Arena
 
@@ -22,9 +23,13 @@ def load_save():
     try:
         with open(SAVE_FILE) as f:
             d = json.load(f)
-        return {"unlocked": int(d.get("unlocked", 0)), "best": int(d.get("best", 0))}
+        out = {"unlocked": int(d.get("unlocked", 0)), "best": int(d.get("best", 0))}
+        if "keys" in d:
+            controls.load_bindings(d["keys"])
+        out["keys"] = controls.export_bindings()
+        return out
     except Exception:
-        return {"unlocked": 0, "best": 0}
+        return {"unlocked": 0, "best": 0, "keys": controls.export_bindings()}
 
 
 def write_save(data):
@@ -185,6 +190,7 @@ class TitleScene(MenuScene):
         items = [
             ("Campaign", lambda: game.set_scene(CampaignSelect(game))),
             ("Versus Battle", lambda: game.set_scene(VersusSetup(game))),
+            ("Controls", lambda: game.set_scene(ControlsScene(game))),
             ("How to Play", lambda: game.set_scene(HelpScene(game))),
             ("Credits", lambda: game.set_scene(CreditsScene(game))),
             (lambda: "Fullscreen: " + ("On" if game.fullscreen else "Off"), game.toggle_fullscreen),
@@ -248,12 +254,16 @@ class CampaignSelect(MenuScene):
              (SW // 2, SH - 30), (120, 130, 160))
 
 
-SLOT_TYPES = ["Keys: WASD", "Keys: Arrows", "Gamepad 1", "Gamepad 2", "Bot (easy)", "Bot (hard)", "Off"]
+SLOT_TYPES = ["Keyboard 1", "Keyboard 2", "Keyboard 3", "Gamepad 1", "Gamepad 2",
+              "Bot (easy)", "Bot (hard)", "Off"]
+HUMAN_SLOTS = {"Keyboard 1": "p1", "Keyboard 2": "p2", "Keyboard 3": "p3",
+               "Gamepad 1": 0, "Gamepad 2": 1}
 
 
 class VersusSetup(MenuScene):
     def __init__(self, game):
-        self.slots = getattr(game, "versus_slots", [0, 1, 5, 4])
+        self.slots = getattr(game, "versus_slots", [SLOT_TYPES.index(n) for n in
+                                                   ("Keyboard 1", "Keyboard 2", "Bot (hard)", "Bot (easy)")])
         self.wins = getattr(game, "versus_wins", 3)
         self.arena_idx = getattr(game, "versus_arena", 0)
         items = []
@@ -281,9 +291,9 @@ class VersusSetup(MenuScene):
         if len(active) < 2:
             self.msg = "Need at least two fighters."
             return
-        humans = [s for s in self.slots if s <= 3]
+        humans = [s for s in self.slots if SLOT_TYPES[s] in HUMAN_SLOTS]
         if len(humans) != len(set(humans)):
-            self.msg = "Each keyboard half / gamepad can only control one fighter."
+            self.msg = "Each keyboard layout / gamepad can only control one fighter."
             return
         self.game.versus_slots, self.game.versus_wins, self.game.versus_arena = self.slots, self.wins, self.arena_idx
         self.game.set_scene(VersusScene(self.game, list(self.slots), self.wins, self.arena_idx))
@@ -303,7 +313,132 @@ class VersusSetup(MenuScene):
         self.draw_items(surf, 190)
         if self.msg:
             text(surf, f["sm"], self.msg, (SW // 2, SH - 60), (255, 120, 120))
-        text(surf, f["xs"], f"Gamepads detected: {pygame.joystick.get_count()}    ·    Left/Right to change",
+        text(surf, f["xs"], f"Gamepads detected: {pygame.joystick.get_count()}    ·    Left/Right to change"
+             "    ·    Rebind keys under Controls",
+             (SW // 2, SH - 30), (120, 130, 160))
+
+
+class ControlsScene(Scene):
+    """Rebind both keyboard layouts. A key can only belong to one action in one layout."""
+    def __init__(self, game):
+        super().__init__(game)
+        self.backdrop = game.backdrop
+        self.row, self.col = 0, 0          # rows 0-5 actions, 6 reset, 7 back
+        self.waiting = False
+        self.msg, self.msg_col, self.msg_t = "", (190, 200, 220), 0.0
+
+    def _say(self, msg, col=(190, 200, 220)):
+        self.msg, self.msg_col, self.msg_t = msg, col, 3.0
+
+    def _save(self):
+        self.game.save["keys"] = controls.export_bindings()
+        write_save(self.game.save)
+
+    def back(self):
+        self.game.set_scene(TitleScene(self.game))
+
+    def event(self, e):
+        if self.waiting:
+            self._capture(e)
+            return
+        a = nav_action(e)
+        n = len(controls.ACTIONS) + 2
+        if a in ("up", "down"):
+            self.row = (self.row + (1 if a == "down" else -1)) % n
+            self.game.audio.play("menu")
+        elif a in ("left", "right") and self.row < len(controls.ACTIONS):
+            self.col = (self.col + (1 if a == "right" else -1)) % len(controls.LAYOUTS)
+            self.game.audio.play("menu")
+        elif a == "ok":
+            self.game.audio.play("select")
+            if self.row < len(controls.ACTIONS):
+                self.waiting = True
+                self._say("Press a key...  (Esc cancels)", (255, 230, 120))
+            elif self.row == len(controls.ACTIONS):
+                controls.reset_bindings()
+                self._save()
+                self._say("Default keys restored.", (140, 240, 120))
+            else:
+                self.back()
+        elif a == "back":
+            self.back()
+
+    def _capture(self, e):
+        if e.type == pygame.JOYBUTTONDOWN and e.button in (1, 6, 7):
+            self.waiting = False
+            self._say("Cancelled.")
+            return
+        if e.type != pygame.KEYDOWN or not e.key:
+            return
+        if e.key == pygame.K_ESCAPE:
+            self.waiting = False
+            self._say("Cancelled.")
+            return
+        if e.key in controls.RESERVED:
+            self._say(f"{controls.key_label(e.key)} is reserved. Try another key.", (255, 120, 120))
+            return
+        lay = controls.LAYOUTS[self.col]
+        act = controls.ACTIONS[self.row]
+        owner = controls.find_owner(e.key)
+        if owner and owner != (lay, act):
+            olay, oact = owner
+            self._say(f"{controls.key_label(e.key)} is already used by "
+                      f"{controls.LAYOUT_NAMES[olay]} · {controls.ACTION_NAMES[oact]}. Try another key.",
+                      (255, 120, 120))
+            self.game.audio.play("menu")
+            return
+        controls.bindings[lay][act] = [e.key]
+        self.waiting = False
+        self._save()
+        self.game.audio.play("select")
+        self._say(f"{controls.LAYOUT_NAMES[lay]} · {controls.ACTION_NAMES[act]}: "
+                  f"{controls.key_label(e.key)}", (140, 240, 120))
+
+    def update(self, dt):
+        self.backdrop.update(dt)
+        if self.msg_t > 0 and not self.waiting:
+            self.msg_t -= dt
+            if self.msg_t <= 0:
+                self.msg = ""
+
+    def draw(self, surf):
+        self.backdrop.draw(surf)
+        f = self.game.fonts
+        glow_text(surf, f["lg"], "CONTROLS", (SW // 2, 80), (120, 220, 255))
+        cx = [335, 510, 685]
+        y0 = 170
+        for c, lay in enumerate(controls.LAYOUTS):
+            text(surf, f["sm"], controls.LAYOUT_NAMES[lay], (cx[c], y0 - 40), PLAYER_COLORS[c])
+        for r, act in enumerate(controls.ACTIONS):
+            y = y0 + r * 52
+            text(surf, f["sm"], controls.ACTION_NAMES[act], (240, y), (210, 220, 240), "midright")
+            for c, lay in enumerate(controls.LAYOUTS):
+                sel = r == self.row and c == self.col
+                label = "Press a key..." if sel and self.waiting else controls.keys_label(controls.bindings[lay][act])
+                lf = f["sm"] if f["sm"].size(label)[0] <= 150 else f["xs"]
+                w = 166
+                box = pygame.Surface((w, 38), pygame.SRCALPHA)
+                if sel:
+                    blink = self.waiting and int(self.backdrop.t * 4) % 2
+                    pygame.draw.rect(box, (255, 255, 255, 40), box.get_rect(), border_radius=10)
+                    pygame.draw.rect(box, (255, 230, 120, 80 if blink else 200), box.get_rect(), 2,
+                                     border_radius=10)
+                else:
+                    pygame.draw.rect(box, (255, 255, 255, 14), box.get_rect(), border_radius=10)
+                surf.blit(box, (cx[c] - w // 2, y - 19))
+                text(surf, lf, label, (cx[c], y), (255, 230, 120) if sel else (190, 200, 220))
+        for i, lab in enumerate(["Reset to Defaults", "Back"]):
+            r = len(controls.ACTIONS) + i
+            y = y0 + len(controls.ACTIONS) * 52 + 30 + i * 52
+            sel = r == self.row
+            text(surf, f["md"], lab, (SW // 2, y), (255, 230, 120) if sel else (190, 200, 220))
+            if sel:
+                spr = art.bomb_sprite(int(self.backdrop.t * 8) % 8, (255, 140, 60))
+                w = f["md"].size(lab)[0]
+                surf.blit(pygame.transform.smoothscale(spr, (36, 36)), (SW // 2 - w // 2 - 50, y - 20))
+        if self.msg:
+            text(surf, f["sm"], self.msg, (SW // 2, SH - 70), self.msg_col)
+        text(surf, f["xs"], "Up/Down/Left/Right select · Enter rebind · Each key can only be used once",
              (SW // 2, SH - 30), (120, 130, 160))
 
 
@@ -347,6 +482,13 @@ class HelpScene(MenuScene):
     def __init__(self, game):
         super().__init__(game, [("Back", lambda: game.set_scene(TitleScene(game)))])
 
+    @staticmethod
+    def _layout_line(lay):
+        b = controls.bindings[lay]
+        move = " ".join(controls.key_label(b[a][0]) if b[a] else "-" for a in ("up", "left", "down", "right"))
+        return (f"{move} move · {controls.keys_label(b['bomb'])} drop · "
+                f"{controls.keys_label(b['det'])} trigger")
+
     def back(self):
         self.game.set_scene(TitleScene(self.game))
 
@@ -355,15 +497,15 @@ class HelpScene(MenuScene):
         f = self.game.fonts
         glow_text(surf, f["lg"], "HOW TO PLAY", (SW // 2, 70), (150, 255, 170))
         lines = [
-            ("Player 1", "WASD move · Space drop · L-Shift / E trigger"),
-            ("Player 2", "Arrows move · R-Ctrl / Enter drop · R-Shift trigger"),
+            *[(controls.LAYOUT_NAMES[lay], self._layout_line(lay)) for lay in controls.LAYOUTS],
             ("Gamepad", "D-pad / stick move · A drop · B trigger"),
-            ("Campaign", "Either keyboard layout works. Esc pauses."),
+            ("Campaign", "Any keyboard layout works. Esc pauses."),
         ]
         y = 140
         for a, b in lines:
             text(surf, f["sm"], a, (70, y), (255, 220, 120), "midleft")
-            text(surf, f["sm"], b, (210, y), (210, 220, 240), "midleft")
+            bf = f["sm"] if f["sm"].size(b)[0] <= SW - 250 else f["xs"]
+            text(surf, bf, b, (225, y), (210, 220, 240), "midleft")
             y += 36
         y += 16
         for kind in ITEM_COLORS:
@@ -459,7 +601,7 @@ class CampaignScene(Scene):
         self.stage = stage
         self.score = score
         self.lives = lives
-        self.ctrl = MultiController([KeyController(KB_ALL, "keys"), PadController(0, "pad")], "P1")
+        self.ctrl = MultiController([KeyController(controls.campaign_map(), "keys"), PadController(0, "pad")], "P1")
         self.carry = carry
         self.paused = None
         self._new_arena()
@@ -631,10 +773,9 @@ class VersusScene(Scene):
             kind = SLOT_TYPES[s]
             if kind == "Off":
                 continue
-            if s == 0: c = KeyController(KB1, "WASD")
-            elif s == 1: c = KeyController(KB2, "Arrows")
-            elif s == 2: c = PadController(0, "Pad 1")
-            elif s == 3: c = PadController(1, "Pad 2")
+            src = HUMAN_SLOTS.get(kind)
+            if isinstance(src, str): c = KeyController(controls.bindings[src], kind)
+            elif src is not None: c = PadController(src, f"Pad {src + 1}")
             else: c = BotController(Bot(i * 17 + 3, 0.55 if "easy" in kind else 0.95))
             self.fighters.append((i, c))
         self.wins = {i: 0 for i, _ in self.fighters}

@@ -6,8 +6,86 @@ KB1 = dict(up=[pygame.K_w], down=[pygame.K_s], left=[pygame.K_a], right=[pygame.
 KB2 = dict(up=[pygame.K_UP], down=[pygame.K_DOWN], left=[pygame.K_LEFT], right=[pygame.K_RIGHT],
            bomb=[pygame.K_RCTRL, pygame.K_RETURN, pygame.K_KP0],
            det=[pygame.K_RSHIFT, pygame.K_KP_PERIOD])
-KB_ALL = {k: KB1[k] + KB2[k] + ([pygame.K_x] if k == "bomb" else [pygame.K_z] if k == "det" else [])
-          for k in KB1}
+KB3 = dict(up=[pygame.K_i], down=[pygame.K_k], left=[pygame.K_j], right=[pygame.K_l],
+           bomb=[pygame.K_o], det=[pygame.K_u])
+DEFAULTS = {"p1": KB1, "p2": KB2, "p3": KB3}
+LAYOUTS = ["p1", "p2", "p3"]
+LAYOUT_NAMES = {"p1": "Keyboard 1", "p2": "Keyboard 2", "p3": "Keyboard 3"}
+ACTIONS = ["up", "down", "left", "right", "bomb", "det"]
+ACTION_NAMES = {"up": "Up", "down": "Down", "left": "Left", "right": "Right",
+                "bomb": "Drop charge", "det": "Trigger"}
+RESERVED = {pygame.K_ESCAPE, pygame.K_F11}   # pause / fullscreen, never bindable
+
+# live, user-editable bindings (loaded from the save file at startup)
+bindings = {lay: {a: list(DEFAULTS[lay][a]) for a in ACTIONS} for lay in LAYOUTS}
+
+
+def reset_bindings():
+    for lay in LAYOUTS:
+        bindings[lay] = {a: list(DEFAULTS[lay][a]) for a in ACTIONS}
+
+
+def load_bindings(data):
+    """Apply saved bindings. Layouts missing from the save (e.g. a newly added one) get their
+    defaults; a key already claimed by an earlier action is dropped so nothing is duplicated."""
+    reset_bindings()
+    seen = set(RESERVED)
+    new = {}
+    saved = [l for l in LAYOUTS if isinstance(data, dict) and isinstance(data.get(l), dict)]
+    for lay in saved + [l for l in LAYOUTS if l not in saved]:
+        new[lay] = {}
+        for a in ACTIONS:
+            try:
+                keys = [int(k) for k in data[lay][a]]
+            except Exception:
+                keys = list(DEFAULTS[lay][a])
+            keys = [k for k in dict.fromkeys(keys) if k not in seen]
+            seen.update(keys)
+            new[lay][a] = keys
+    bindings.update(new)
+
+
+def export_bindings():
+    return {lay: {a: list(bindings[lay][a]) for a in ACTIONS} for lay in LAYOUTS}
+
+
+def find_owner(key):
+    """Return (layout, action) already using this key, or None."""
+    for lay in LAYOUTS:
+        for a in ACTIONS:
+            if key in bindings[lay][a]:
+                return lay, a
+    return None
+
+
+def campaign_map():
+    """Single-player mapping: every keyboard layout plus X / Z when they are free."""
+    m = {a: [k for lay in LAYOUTS for k in bindings[lay][a]] for a in ACTIONS}
+    for k, a in ((pygame.K_x, "bomb"), (pygame.K_z, "det")):
+        if find_owner(k) is None:
+            m[a] = m[a] + [k]
+    return m
+
+
+_PRETTY = {"left shift": "L-Shift", "right shift": "R-Shift", "left ctrl": "L-Ctrl",
+           "right ctrl": "R-Ctrl", "left alt": "L-Alt", "right alt": "R-Alt",
+           "return": "Enter", ",": "Comma", ".": "Period", "/": "Slash", ";": "Semicolon",
+           "'": "Quote", "-": "Minus", "=": "Equals", "[": "L-Bracket", "]": "R-Bracket",
+           "up": "Up", "down": "Down", "left": "Left", "right": "Right"}
+
+
+def key_label(k):
+    n = pygame.key.name(k)
+    if n in _PRETTY:
+        return _PRETTY[n]
+    if n.startswith("[") and n.endswith("]"):
+        return "Num " + n[1:-1]
+    return n.upper() if len(n) == 1 else n.title()
+
+
+def keys_label(keys):
+    return " / ".join(key_label(k) for k in keys) if keys else "(none)"
+
 
 VEC = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
 

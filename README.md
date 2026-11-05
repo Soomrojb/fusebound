@@ -25,7 +25,7 @@
 ## Features
 
 - **Campaign:** 20 stages across 4 themed worlds (*Neon Foundry, Frost Circuit, Ember Ruins, Void Garden*). Defeat every enemy, then find the portal hidden under one of the crates. Your progress and best score are saved.
-- **Versus Battle:** up to 4 fighters on one machine. Each slot can be a keyboard player, a gamepad or a bot (easy or hard). Play first-to-N rounds. When the timer runs out, **sudden death** starts and blocks fill the arena in a spiral.
+- **Versus Battle:** up to 4 fighters on one machine. Each slot can be one of three keyboard layouts, a gamepad or a bot (easy or hard). Play first-to-N rounds. When the timer runs out, **sudden death** starts and blocks fill the arena in a spiral.
 - **5 enemy types**, each moving in its own way. Wanderers pick random routes. Hunters track you down with pathfinding. Wisps drift through crates, and armored brutes take two hits.
 - **6 power-ups:** extra charge, bigger blast, speed, remote trigger, phase-walk through crates, and a one-hit shield.
 - **Chain reactions:** blasts set off other charges they reach.
@@ -68,9 +68,16 @@ python3 -m fusebound
 |--------------|----------------|----------------------|------------------|
 | **Player 1** | `W` `A` `S` `D` | `Space`              | `Left Shift` / `E` |
 | **Player 2** | Arrow keys     | `Right Ctrl` / `Enter` | `Right Shift`    |
+| **Player 3** | `I` `J` `K` `L` | `O`                 | `U`              |
 | **Gamepad**  | D-pad / stick  | `A`                  | `B`              |
 
-In the campaign, either keyboard layout controls your fighter.
+These are the defaults. Open **Controls** from the main menu to rebind any action for any of the
+three keyboard layouts. Select an action, press `Enter`, then press the new key (`Esc` cancels).
+A key can only be used by one action, so the game rejects a key that is already taken and
+tells you where it is used. `Esc` and `F11` are reserved. Your bindings are saved with your
+progress, and **Reset to Defaults** restores the table above.
+
+In the campaign, any keyboard layout controls your fighter.
 `Esc` pauses · `F11` toggles fullscreen.
 
 ## Power-ups
